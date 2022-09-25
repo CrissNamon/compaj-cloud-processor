@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: processor-service
+  cloud:
+    bus:
+      enabled: true
+      id: config-service
+    stream:
+      kafka:
+        binder:
+          brokers: kafka1:19092
+  security:
+    oauth2:
+      resourceserver:
+        provider-uri: http://192.168.1.144:9090
+        jwt:
+          jwk-set-uri: '${spring.security.oauth2.resourceserver.provider-uri}/auth/realms/compaj/protocol/openid-connect/certs'
+          issuer-uri: '${spring.security.oauth2.resourceserver.provider-uri}/auth/realms/compaj'
+  main:
+    web-application-type: reactive
+
+eureka:
+  client:
+    register-with-eureka: true
+    fetch-registry: true
+    enabled: true
+    service-url:
+      defaultZone: http://discovery-service:8761/eureka/
+  instance:
+    hostname: processor-service
+
+server:
+  port: 8081
+
+logging:
+  level:
+    org:
+      springframework:
+        security: TRACE
+    reactor:
+      netty: TRACE
+
+container-service:
+  path: "/usr/local/bin/docker"
+  image: "kpekepsalt/compaj-repl:latest"
+  command: "compaj"
+  logDirectory: "./compaj"

@@ -6,14 +6,15 @@ import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import reactor.core.publisher.Flux;
-import tech.hiddenproject.compajcloud.processorservice.process.Action;
 import tech.hiddenproject.compajcloud.processorservice.process.CommandExecutor;
 
 /**
  * @author Danila Rassokhin
  */
 public class IOExecutor implements CommandExecutor {
+
   private final NuProcessBuilder processBuilder;
+
   private final CommandExecutionHandler processHandler;
 
   public IOExecutor(String cmd, String... args) {
@@ -23,6 +24,10 @@ public class IOExecutor implements CommandExecutor {
     processHandler = new CommandExecutionHandler();
     processBuilder = new NuProcessBuilder(fullCommand);
     processBuilder.setProcessListener(processHandler);
+  }
+
+  public static IOExecutor of(String cmd, String... args) {
+    return new IOExecutor(cmd, args);
   }
 
   @Override
@@ -50,7 +55,7 @@ public class IOExecutor implements CommandExecutor {
   }
 
   @Override
-  public IOExecutor onStop(Action event) {
+  public IOExecutor onStop(Consumer<Integer> event) {
     processHandler.addOnStop(event);
     return this;
   }
@@ -58,17 +63,13 @@ public class IOExecutor implements CommandExecutor {
   @Override
   public Flux<String> async() {
     return Flux.push(processHandler::reactive)
-            .doFirst(processBuilder::start);
+        .doFirst(processBuilder::start);
   }
 
   @Override
   public Flux<String> sync() {
     return Flux.push(processHandler::reactive)
         .doOnSubscribe(s -> processBuilder.start());
-  }
-
-  public static IOExecutor of(String cmd, String... args) {
-    return new IOExecutor(cmd, args);
   }
 
 }

@@ -1,58 +1,67 @@
 package tech.hiddenproject.compajcloud.processorservice.controller;
 
-import java.io.IOException;
-import java.util.concurrent.atomic.AtomicInteger;
-import lombok.AllArgsConstructor;
+import java.time.Duration;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.context.request.async.DeferredResult;
+import org.springframework.web.reactive.function.server.ServerRequest;
+import org.springframework.web.reactive.function.server.ServerResponse;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import tech.hiddenproject.compajcloud.processorservice.data.DockerEvent;
-import tech.hiddenproject.compajcloud.processorservice.process.impl.IOExecutor;
+import tech.hiddenproject.compajcloud.processorservice.data.ContainerEvent;
 import tech.hiddenproject.compajcloud.processorservice.service.ContainerService;
+import tech.hiddenproject.compajcloud.processorservice.service.OutputStream;
 
 /**
  * @author Danila Rassokhin
  */
 @RestController
-@AllArgsConstructor(onConstructor = @__(@Autowired))
+@RequiredArgsConstructor(onConstructor = @__(@Autowired))
 @Slf4j
 public class ProcessorController {
 
-  private ContainerService containerService;
+  private final ContainerService containerService;
 
-  @GetMapping("/create")
-  public void createContainer() throws IOException, InterruptedException {
-    containerService.create("Container_1");
+  private final OutputStream fileOutputStream;
+
+  private static <T> Mono<ServerResponse> keepAlive(Duration duration, Flux<T> data) {
+    Flux<ServerSentEvent<T>> heartBeat = Flux.interval(duration)
+        .map(
+            e -> ServerSentEvent.<T>builder()
+                .comment("keep alive")
+                .build()
+        )
+        .doOnEach(serverSentEventSignal -> log.info("PING"))
+        .doFinally(signalType -> log.info("SIGNAL FROM HEARTBEAT: " + signalType));
+    return ServerResponse.ok()
+        .contentType(MediaType.TEXT_EVENT_STREAM)
+        .body(Flux.merge(heartBeat, data), ServerSentEvent.class);
   }
 
-  @GetMapping("/check")
-  public Mono<Boolean> checkContainer() {
-    return containerService.isRunning("Container_1");
+  public Mono<ServerResponse> watch(ServerRequest serverRequest) {
+    return keepAlive(Duration.ofSeconds(2), containerService.watch());
   }
 
-  @GetMapping("/watch")
-  public DeferredResult<DockerEvent> watch() {
-    DeferredResult<DockerEvent> result = new DeferredResult<>();
-    result.setResult(new DockerEvent());
-    containerService.watch()
-        .subscribe(result::setResult);
-    return result;
+  public Mono<ServerResponse> watchContainer(ServerRequest serverRequest) {
+    String id = serverRequest.pathVariable("id");
+    Flux<ServerSentEvent<ContainerEvent>> events = fileOutputStream.read(id)
+        .doOnSubscribe(subscription -> log.info("Subscribed to file: " + subscription))
+        .map(containerEvent -> ServerSentEvent.<ContainerEvent>builder().data(containerEvent).build())
+        .doOnComplete(() -> log.info("COMPLETED SSE"))
+        .doFinally(signalType -> log.info("FINALlY SSE: " + signalType))
+        .timeout(Duration.ofSeconds(3600));
+    return keepAlive(Duration.ofSeconds(2), events);
   }
 
-  @GetMapping("/test")
-  public void test() {
-    AtomicInteger i = new AtomicInteger(0);
-    IOExecutor.of("/bin/cat")
-        .onStart(pid -> log.info("Started cat cmd"))
-        .onIn(() -> String.valueOf(i.get()))
-        .closeIf(() -> i.getAndIncrement() > 4)
-        .onStop(() -> log.info("Stopped cat cmd"))
-        .sync()
-        .doOnNext(log::info)
-        .subscribe();
+  public Mono<ServerResponse> exec(ServerRequest serverRequest) {
+    String id = serverRequest.pathVariable("id");
+    return serverRequest.bodyToMono(String.class)
+        .flatMap(cmd -> ServerResponse.ok()
+            .body(containerService.exec(id, cmd), Boolean.class)
+        );
   }
 
 }

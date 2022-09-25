@@ -7,32 +7,65 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.FluxSink;
-import tech.hiddenproject.compajcloud.processorservice.process.Action;
 
 /**
  * @author Danila Rassokhin
  */
 @Slf4j
 public class CommandExecutionHandler extends NuAbstractProcessHandler {
+
   private NuProcess nuProcess;
+
   private Consumer<Integer> onStart;
+
   private Consumer<String> onEach;
-  private Action onStop;
+
+  private Consumer<Integer> onStop;
+
   private Supplier<String> onIn;
-  private Supplier<Boolean> closeIf = () -> true;
+
+  private Supplier<Boolean> closeIf;
 
   private FluxSink<String> sink;
 
   private boolean completed = false;
 
+  public CommandExecutionHandler() {
+    onStart = pid -> {};
+    onEach = e -> {};
+    onStop = code -> {};
+    closeIf = () -> true;
+    sink = new EmptySink<>();
+  }
+
   @Override
   public void onStart(NuProcess nuProcess) {
     this.nuProcess = nuProcess;
-    if (onStart != null) {
-      onStart.accept(nuProcess.getPID());
-    }
+    onStart.accept(nuProcess.getPID());
     if (onIn != null) {
       this.nuProcess.wantWrite();
+    }
+  }
+
+  @Override
+  public void onExit(int statusCode) {
+    super.onExit(statusCode);
+    stop(statusCode);
+  }
+
+  @Override
+  public void onStdout(ByteBuffer buffer, boolean closed) {
+    if (!closed) {
+      byte[] bytes = new byte[buffer.remaining()];
+      buffer.get(bytes);
+      String output = new String(bytes);
+      sink.next(output);
+      onEach.accept(output);
+      if (closeIf.get() && !completed) {
+        nuProcess.closeStdin(true);
+      } else if (onIn != null) {
+        nuProcess.wantWrite();
+      }
     }
   }
 
@@ -44,32 +77,6 @@ public class CommandExecutionHandler extends NuAbstractProcessHandler {
       buffer.flip();
     }
     return false;
-  }
-
-  @Override
-  public void onStdout(ByteBuffer buffer, boolean closed) {
-    if (!closed) {
-      byte[] bytes = new byte[buffer.remaining()];
-      buffer.get(bytes);
-      String output = new String(bytes);
-      if (sink != null) {
-        sink.next(output);
-      }
-      if (onEach != null) {
-        onEach.accept(output);
-      }
-      if (closeIf.get() && !completed) {
-        nuProcess.closeStdin(true);
-      } else if (onIn != null) {
-        nuProcess.wantWrite();
-      }
-    }
-  }
-
-  @Override
-  public void onExit(int statusCode) {
-    super.onExit(statusCode);
-    stop();
   }
 
   public void addOnStart(Consumer<Integer> onStart) {
@@ -84,17 +91,17 @@ public class CommandExecutionHandler extends NuAbstractProcessHandler {
     this.closeIf = closeIf;
   }
 
-  public void stop() {
-    if (sink != null) {
+  public void stop(int statusCode) {
+    if (statusCode == 0) {
       sink.complete();
+    } else {
+      sink.error(new Exception("Error: " + statusCode));
     }
-    if (onStop != null) {
-      onStop.make();
-    }
+    onStop.accept(statusCode);
     completed = true;
   }
 
-  public void addOnStop(Action onStop) {
+  public void addOnStop(Consumer<Integer> onStop) {
     this.onStop = onStop;
   }
 

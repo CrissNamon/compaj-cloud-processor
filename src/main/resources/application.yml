@@ -16,6 +16,8 @@ spring:
         jwt:
           jwk-set-uri: '${spring.security.oauth2.resourceserver.provider-uri}/auth/realms/compaj/protocol/openid-connect/certs'
           issuer-uri: '${spring.security.oauth2.resourceserver.provider-uri}/auth/realms/compaj'
+  main:
+    web-application-type: reactive
 
 eureka:
   client:
@@ -35,3 +37,11 @@ logging:
     org:
       springframework:
         security: TRACE
+    reactor:
+      netty: TRACE
+
+container-service:
+  path: "/usr/local/bin/docker"
+  image: "kpekepsalt/compaj-repl:latest"
+  command: "compaj"
+  logDirectory: "./compaj"

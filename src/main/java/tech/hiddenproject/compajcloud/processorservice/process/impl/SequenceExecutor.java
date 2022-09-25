@@ -18,16 +18,16 @@ public class SequenceExecutor implements PipelineExecutor {
     cmds.addAll(List.of(next));
     for (int i = 0; i < cmds.size() - 1; i++) {
       int finalI = i;
-      cmds.get(i).onStop(() -> cmds.get(finalI + 1).sync().subscribe());
+      cmds.get(i).onStop(code -> cmds.get(finalI + 1).sync().subscribe());
     }
+  }
+
+  public static PipelineExecutor of(CommandExecutor first, CommandExecutor... next) {
+    return new SequenceExecutor(first, next);
   }
 
   @Override
   public void execute() {
     cmds.get(0).sync().subscribe();
-  }
-
-  public static PipelineExecutor of(CommandExecutor first, CommandExecutor... next) {
-    return new SequenceExecutor(first, next);
   }
 }
